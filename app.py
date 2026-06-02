@@ -150,11 +150,15 @@ CTA:
         "cta":        extraer("CTA", respuesta),
     }
 
-def generar_excel(piezas):
-    import io, pandas as pd
-    rows = []
+def generar_csv(piezas):
+    import io, csv
+    buf = io.StringIO()
+    campos = ["Fecha","Pilar","Formato","Canal","Subtema","Ángulo / Título",
+              "Producción","Caption","CTA","Hashtags","Vocero","Status"]
+    writer = csv.DictWriter(buf, fieldnames=campos)
+    writer.writeheader()
     for p in piezas:
-        rows.append({
+        writer.writerow({
             "Fecha":           p["fecha"].strftime("%d/%m/%Y"),
             "Pilar":           p["pilar"],
             "Formato":         p["formato"],
@@ -168,19 +172,7 @@ def generar_excel(piezas):
             "Vocero":          p.get("vocero",""),
             "Status":          p.get("status","Por planear"),
         })
-    df  = pd.DataFrame(rows)
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name="Parrilla")
-        wb  = writer.book
-        ws  = writer.sheets["Parrilla"]
-        hdr = wb.add_format({"bold": True, "bg_color": "#7C5CBF", "font_color": "#FFFFFF", "border": 1})
-        for col_num, col_name in enumerate(df.columns):
-            ws.write(0, col_num, col_name, hdr)
-            col_w = max(df[col_name].astype(str).map(len).max(), len(col_name)) + 4
-            ws.set_column(col_num, col_num, min(col_w, 60))
-    buf.seek(0)
-    return buf
+    return buf.getvalue().encode("utf-8-sig")  # utf-8-sig abre bien en Excel
 
 def generar_fechas(año, mes_num):
     _, dias = calendar.monthrange(año, mes_num)
@@ -390,12 +382,12 @@ with tab_parrilla:
             st.markdown(f"**{len(piezas)} piezas** · {mes_sel} {int(año_sel)}")
 
             # ── Descarga Excel ────────────────────────────────────────────
-            excel_buf = generar_excel(piezas)
+            csv_data = generar_csv(piezas)
             st.download_button(
-                label="⬇️ Descargar Excel",
-                data=excel_buf,
-                file_name=f"Parrilla_{mes_sel}_{int(año_sel)}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                label="⬇️ Descargar CSV (abre en Excel)",
+                data=csv_data,
+                file_name=f"Parrilla_{mes_sel}_{int(año_sel)}.csv",
+                mime="text/csv",
             )
 
             st.markdown("---")
