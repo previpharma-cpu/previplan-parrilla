@@ -99,11 +99,12 @@ def llamar_groq(prompt, api_key, model="llama-3.3-70b-versatile"):
     except Exception as e:
         return f"[Error Groq: {e}]"
 
-def prompt_para_formato(fmt, pilar, subtema, vocero):
+def prompt_para_formato(fmt, pilar, subtema, vocero, contexto_mes=""):
     fmt = fmt.lower()
+    ctx = f"\nCONTEXTO DEL MES: {contexto_mes.strip()}" if contexto_mes.strip() else ""
     if "reel" in fmt:
         return f"""Guion REEL Instagram (30-45 seg).
-Pilar: {pilar} | Tema: {subtema} | Vocero: {vocero}
+Pilar: {pilar} | Tema: {subtema} | Vocero: {vocero}{ctx}
 
 GANCHO (3 seg): [frase que detenga el scroll]
 DESARROLLO (20-30 seg): [3-4 puntos numerados]
@@ -114,26 +115,26 @@ NOTAS: subtítulos grandes, logo Previplan al final."""
     elif "carrusel" in fmt:
         n = 6 if pilar == "Educativo" else 5
         return f"""Carrusel Instagram ({n} láminas).
-Pilar: {pilar} | Tema: {subtema}
+Pilar: {pilar} | Tema: {subtema}{ctx}
 LÁMINA 1: Gancho + "Desliza →"
 LÁMINAS 2-{n-1}: Una idea por lámina
 LÁMINA {n}: Cierre + CTA Previplan
 NOTAS: colores corporativos, formato 1:1."""
     elif "stories" in fmt:
         return f"""4 Stories Instagram.
-Pilar: {pilar} | Tema: {subtema}
+Pilar: {pilar} | Tema: {subtema}{ctx}
 H1: Gancho | H2: Punto clave | H3: Solución Previplan | H4: CTA link bio"""
     elif "video largo" in fmt:
         return f"""Video YouTube 10-15 min.
-Tema: {subtema} | Vocero: {vocero}
+Tema: {subtema} | Vocero: {vocero}{ctx}
 INTRO (1-2 min) | CONTENIDO (7-10 min, 5 bloques) | CIERRE + CTA Previplan"""
     elif "short" in fmt:
         return f"""Short YouTube máx 60 seg.
-Tema: {subtema}
+Tema: {subtema}{ctx}
 0-3s GANCHO | 3-45s CONTENIDO (3 puntos) | 45-60s CTA Previplan"""
     else:
         return f"""Post estático Instagram.
-Pilar: {pilar} | Tema: {subtema}
+Pilar: {pilar} | Tema: {subtema}{ctx}
 COPY IMAGEN: título + subtítulo + CTA
 CAPTION: 3-4 párrafos. Precio: $50.000/3 meses."""
 
@@ -184,6 +185,14 @@ with st.sidebar:
     sheet_id = st.text_input("ID del Spreadsheet",
                               placeholder="1AihVeH-VAVT8RxoRubK6gaeWJTOhg4kzrG3dgu6CHMg",
                               help="El ID está en la URL de tu Google Sheet")
+
+    st.subheader("📝 Contexto del mes")
+    contexto_mes = st.text_area(
+        "Eventos, fechas clave, campañas especiales...",
+        placeholder="Ej: Junio es el mes de la salud mental. Hay feria de bienestar el 15. Lanzamos el paquete Mental Plus. Día del padre el 22.",
+        height=120,
+        help="La IA usará este contexto para personalizar los guiones del mes."
+    )
 
     st.subheader("📌 Pilares y distribución")
     pilares_config = []
@@ -272,7 +281,10 @@ with tab2:
             fechas,
         )
         st.session_state.piezas = piezas
+        st.session_state.contexto_mes = contexto_mes  # guardamos para los guiones
         st.success(f"✅ {len(piezas)} piezas generadas.")
+        if contexto_mes.strip():
+            st.info(f"📝 Contexto aplicado: {contexto_mes[:120]}...")
 
     if "piezas" in st.session_state and st.session_state.piezas:
         piezas = st.session_state.piezas
@@ -298,7 +310,7 @@ with tab2:
             if st.button("🤖 Generar todos los guiones", type="primary"):
                 progress = st.progress(0, text="Generando guiones...")
                 for idx, p in enumerate(piezas):
-                    prompt = prompt_para_formato(p["formato"], p["pilar"], p["subtema"], p["vocero"])
+                    prompt = prompt_para_formato(p["formato"], p["pilar"], p["subtema"], p["vocero"], st.session_state.get("contexto_mes", ""))
                     p["guion"] = llamar_groq(prompt, groq_key)
                     lineas = [l.strip() for l in p["guion"].split("\n") if l.strip() and len(l)>20 and not l.isupper()]
                     p["caption"] = " ".join(lineas[:3])[:280]
