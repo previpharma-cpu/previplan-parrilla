@@ -392,29 +392,35 @@ with tab_parrilla:
 
             st.markdown("---")
 
-            # ── Tabla ─────────────────────────────────────────────────────
+            # ── Tarjetas de parrilla ───────────────────────────────────────
             for idx, p in enumerate(piezas):
-                with st.container():
-                    r1 = st.columns([1.2, 2, 1.3, 1, 3, 2])
-                    r1[0].write(p["fecha"].strftime("%d %b"))
-                    r1[1].write(p["pilar"])
-                    r1[2].write(p["formato"])
-                    r1[3].write(p["red"])
-                    angulo_txt = p["angulo"] if p["angulo"] else f"*{p['subtema']}*"
-                    r1[4].write(angulo_txt[:90])
-                    status_idx = STATUS_OPTS.index(p["status"]) if p["status"] in STATUS_OPTS else 0
-                    nuevo_st = r1[5].selectbox("", STATUS_OPTS, index=status_idx,
-                                               key=f"st_{idx}", label_visibility="collapsed")
+                angulo_txt = p["angulo"] if p["angulo"] else p["subtema"]
+                status_idx = STATUS_OPTS.index(p["status"]) if p["status"] in STATUS_OPTS else 0
+
+                with st.container(border=True):
+                    # Fila 1: metadata + status
+                    col_fecha, col_pilar, col_fmt, col_canal, col_status = st.columns([1.2, 2, 1.5, 1.2, 2])
+                    col_fecha.markdown(f"**{p['fecha'].strftime('%d %b')}**")
+                    col_pilar.markdown(f"**{p['pilar']}**")
+                    col_fmt.write(p["formato"])
+                    col_canal.write(p["red"])
+                    nuevo_st = col_status.selectbox(
+                        "", STATUS_OPTS, index=status_idx,
+                        key=f"st_{idx}", label_visibility="collapsed"
+                    )
                     st.session_state.piezas[idx]["status"] = nuevo_st
 
+                    # Fila 2: ángulo
+                    st.markdown(f"📌 **{angulo_txt}**")
+
+                    # Fila 3: caption y CTA en columnas si existen
                     if p.get("caption") or p.get("cta"):
-                        r2 = st.columns([1, 4, 2])
-                        r2[0].markdown("")
+                        col_cap, col_cta = st.columns([3, 1])
                         if p.get("caption"):
-                            r2[1].caption(f"📝 **Caption:** {p['caption'][:180]}{'...' if len(p.get('caption',''))>180 else ''}")
+                            cap_preview = p["caption"][:200] + ("..." if len(p["caption"]) > 200 else "")
+                            col_cap.caption(f"📝 {cap_preview}")
                         if p.get("cta"):
-                            r2[2].caption(f"🎯 **CTA:** {p['cta']}")
-                    st.markdown("---")
+                            col_cta.info(f"🎯 {p['cta']}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — GUIONES
