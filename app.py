@@ -150,6 +150,38 @@ CTA:
         "cta":        extraer("CTA", respuesta),
     }
 
+def generar_excel(piezas):
+    import io, pandas as pd
+    rows = []
+    for p in piezas:
+        rows.append({
+            "Fecha":           p["fecha"].strftime("%d/%m/%Y"),
+            "Pilar":           p["pilar"],
+            "Formato":         p["formato"],
+            "Canal":           p["red"],
+            "Subtema":         p["subtema"],
+            "Ángulo / Título": p.get("angulo",""),
+            "Producción":      p.get("produccion",""),
+            "Caption":         p.get("caption",""),
+            "CTA":             p.get("cta",""),
+            "Hashtags":        (p.get("hashtags","") + " #TuSaludNoDaEspera #Previplan #Previsalud").strip(),
+            "Vocero":          p.get("vocero",""),
+            "Status":          p.get("status","Por planear"),
+        })
+    df  = pd.DataFrame(rows)
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="Parrilla")
+        wb  = writer.book
+        ws  = writer.sheets["Parrilla"]
+        hdr = wb.add_format({"bold": True, "bg_color": "#7C5CBF", "font_color": "#FFFFFF", "border": 1})
+        for col_num, col_name in enumerate(df.columns):
+            ws.write(0, col_num, col_name, hdr)
+            col_w = max(df[col_name].astype(str).map(len).max(), len(col_name)) + 4
+            ws.set_column(col_num, col_num, min(col_w, 60))
+    buf.seek(0)
+    return buf
+
 def generar_fechas(año, mes_num):
     _, dias = calendar.monthrange(año, mes_num)
     return [date(año, mes_num, d) for d in range(1, dias+1)
@@ -358,35 +390,6 @@ with tab_parrilla:
             st.markdown(f"**{len(piezas)} piezas** · {mes_sel} {int(año_sel)}")
 
             # ── Descarga Excel ────────────────────────────────────────────
-            import io, pandas as pd
-            def generar_excel(piezas):
-                rows = []
-                for p in piezas:
-                    rows.append({
-                        "Fecha":       p["fecha"].strftime("%d/%m/%Y"),
-                        "Pilar":       p["pilar"],
-                        "Formato":     p["formato"],
-                        "Canal":       p["red"],
-                        "Subtema":     p["subtema"],
-                        "Ángulo / Título": p.get("angulo",""),
-                        "Producción":  p.get("produccion",""),
-                        "Caption":     p.get("caption",""),
-                        "CTA":         p.get("cta",""),
-                        "Hashtags":    p.get("hashtags","") + " #TuSaludNoDaEspera #Previplan #Previsalud",
-                        "Vocero":      p.get("vocero",""),
-                        "Status":      p.get("status","Por planear"),
-                    })
-                df = pd.DataFrame(rows)
-                buf = io.BytesIO()
-                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                    df.to_excel(writer, index=False, sheet_name="Parrilla")
-                    ws = writer.sheets["Parrilla"]
-                    for col in ws.columns:
-                        max_len = max(len(str(c.value or "")) for c in col)
-                        ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
-                buf.seek(0)
-                return buf
-
             excel_buf = generar_excel(piezas)
             st.download_button(
                 label="⬇️ Descargar Excel",
