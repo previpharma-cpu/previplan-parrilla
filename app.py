@@ -2,6 +2,7 @@
 import streamlit as st
 from datetime import date
 import calendar
+import json
 
 st.set_page_config(
     page_title="Previplan — Generador de Parrilla",
@@ -11,16 +12,16 @@ st.set_page_config(
 
 MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
          "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
-
 FORMATOS = ["Reel","Carrusel","Stories","Post estático","Video largo","Short"]
 REDES    = ["Ig","Ig + Fb","Yt","Fb"]
+STATUS_OPTS = ["Por planear","En producción","En post-producción","En revisión","Aprobado","Programado","Publicado"]
 
 PILARES_DEFAULT = [
-    {"nombre": "Educativo",           "hashtags": "#SaludPreviplan #Prevencion #Bienestar"},
-    {"nombre": "Problema/solución",   "hashtags": "#CosasQueDesesperan #TuSaludNoDaEspera"},
-    {"nombre": "RTB y confianza",     "hashtags": "#TuSaludNoDaEspera #SomosPrevisalud"},
-    {"nombre": "Comunidad y alianzas","hashtags": "#Previplan #AliadosDeSalud"},
-    {"nombre": "Previplan",           "hashtags": "#Previplan #MembresiaDeSalud #AccesoSalud"},
+    {"nombre": "Educativo",            "hashtags": "#SaludPreviplan #Prevencion #Bienestar"},
+    {"nombre": "Problema/solución",    "hashtags": "#CosasQueDesesperan #TuSaludNoDaEspera"},
+    {"nombre": "RTB y confianza",      "hashtags": "#TuSaludNoDaEspera #SomosPrevisalud"},
+    {"nombre": "Comunidad y alianzas", "hashtags": "#Previplan #AliadosDeSalud"},
+    {"nombre": "Previplan",            "hashtags": "#Previplan #MembresiaDeSalud #AccesoSalud"},
 ]
 
 SISTEMA_PROMPT = """Eres un consultor senior de marketing estratégico especializado en marcas de salud.
@@ -28,38 +29,19 @@ Trabajas para Previplan, una membresía médica colombiana que ofrece citas con 
 en 3 días o menos, por $50.000 al trimestre, para ti y hasta 4 beneficiarios,
 con el respaldo de Previsalud.
 
-EXPERIENCIA:
-Eres experto en parrillas de contenido, calendarios editoriales, campañas educativas,
-campañas de conversión, campañas de activación, campañas de fidelización, marketing relacional,
-storytelling, copywriting emocional, redes sociales, WhatsApp Marketing, email marketing,
-blogs, landing pages, video marketing y automatización de contenidos.
+EXPERIENCIA: parrillas de contenido, calendarios editoriales, campañas educativas, campañas de
+conversión y activación, marketing relacional, storytelling, copywriting emocional, redes sociales,
+video marketing y automatización de contenidos.
 
-METODOLOGÍA:
-Antes de construir cualquier pieza analiza:
-- Qué quiere lograr la marca con este contenido.
-- Qué necesita realmente la audiencia.
-- Qué emoción moviliza la acción.
-- Qué barreras pueden impedir la conversión.
-- Qué mensaje tiene mayor probabilidad de generar respuesta.
+METODOLOGÍA: Antes de construir cualquier pieza analiza qué quiere lograr la marca, qué necesita
+la audiencia, qué emoción moviliza la acción, qué barreras impiden la conversión y qué mensaje
+tiene mayor probabilidad de generar respuesta.
 
-ENFOQUE COMERCIAL:
-Siempre identifica oportunidades para generar demanda, incrementar conversiones,
-activar usuarios, mejorar retención y aumentar el Lifetime Value del cliente.
-Equilibra valor para el usuario, credibilidad médica e impacto comercial.
+ESTILO: Humano, cercano, empático, claro, inspirador. Conecta primero con la emoción, luego con
+el beneficio racional. Español colombiano natural. Sin asteriscos ni markdown.
+Siempre termina con un CTA hacia Previplan ($50.000 por 3 meses)."""
 
-ESTILO DE COMUNICACIÓN:
-Humano, cercano, empático, claro, inspirador y profesional.
-Conecta primero con la emoción, luego con el beneficio racional.
-Nunca escribas contenido frío ni excesivamente técnico.
-Idioma: español colombiano natural. Sin asteriscos ni markdown en el guion.
-Siempre termina con un CTA claro hacia Previplan ($50.000 por 3 meses)."""
-
-# ─── Helpers ─────────────────────────────────────────────────────────────────
-def generar_fechas(año, mes_num):
-    _, dias = calendar.monthrange(año, mes_num)
-    return [date(año, mes_num, d) for d in range(1, dias+1)
-            if date(año, mes_num, d).weekday() <= 5]
-
+# ─── Groq ─────────────────────────────────────────────────────────────────────
 def llamar_groq(prompt, api_key):
     try:
         import requests
@@ -72,73 +54,93 @@ def llamar_groq(prompt, api_key):
                     {"role": "system", "content": SISTEMA_PROMPT},
                     {"role": "user",   "content": prompt},
                 ],
-                "temperature": 0.75,
-                "max_tokens": 1200,
+                "temperature": 0.8,
+                "max_tokens": 1400,
             },
             timeout=60,
         )
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        return f"[Error Groq: {e}]"
+        return f"[Error: {e}]"
 
-def prompt_para_formato(fmt, pilar, subtema, vocero, contexto=""):
-    fmt = fmt.lower()
-    ctx = f"\nCONTEXTO DEL MES: {contexto.strip()}" if contexto.strip() else ""
-    base = f"Pilar: {pilar} | Tema: {subtema} | Vocero: {vocero}{ctx}"
+def generar_pieza_ia(pilar, subtema_amplio, formato, vocero, contexto, api_key):
+    """La IA recibe el subtema amplio y genera ángulo, producción, caption y CTA."""
+    fmt = formato.lower()
+
     if "reel" in fmt:
-        return f"""Guion REEL Instagram (30-45 seg).
-{base}
-
-GANCHO (3 seg): [frase que detenga el scroll]
-DESARROLLO (20-30 seg): [3-4 puntos numerados concretos]
-CIERRE + CTA (5 seg): [cierre + Previplan $50.000/3 meses]
----
-CTA engagement: [pregunta para comentarios]
-NOTAS DE PRODUCCIÓN: subtítulos grandes, logo Previplan al final."""
+        instruccion_prod = "Guion de Reel (30-45 seg): GANCHO (3 seg) / DESARROLLO 3-4 puntos / CIERRE + CTA"
     elif "carrusel" in fmt:
-        n = 6 if pilar == "Educativo" else 5
-        return f"""Carrusel Instagram ({n} láminas).
-{base}
-LÁMINA 1: Gancho + "Desliza →"
-LÁMINAS 2 a {n-1}: Una idea clave por lámina (título + 2 líneas)
-LÁMINA {n}: Cierre + CTA Previplan
-NOTAS: colores corporativos, formato 1:1."""
+        instruccion_prod = "Estructura de Carrusel (5-6 láminas): PORTADA / LÁMINAS con una idea cada una / CIERRE"
     elif "stories" in fmt:
-        return f"""4 Stories Instagram.
-{base}
-H1: Gancho | H2: Punto clave | H3: Solución Previplan | H4: CTA link bio
-NOTAS: 9:16, texto grande, máx 15 seg cada una."""
+        instruccion_prod = "4 Stories: Historia 1 gancho / Historia 2 desarrollo / Historia 3 solución / Historia 4 CTA"
     elif "video largo" in fmt:
-        return f"""Video YouTube 10-15 min.
-{base}
-INTRO (1-2 min): gancho + promesa
-CONTENIDO (7-10 min): 5 bloques con ejemplos concretos
-CIERRE (1-2 min): resumen + CTA Previplan + suscripción"""
+        instruccion_prod = "Guion YouTube (10-15 min): INTRO / BLOQUES DE CONTENIDO (5 bloques) / CIERRE"
     elif "short" in fmt:
-        return f"""Short YouTube máx 60 seg.
-{base}
-0-3s GANCHO | 3-45s CONTENIDO (3 puntos) | 45-60s CTA Previplan"""
+        instruccion_prod = "Short YouTube (60 seg): GANCHO / 3 puntos rápidos / CTA"
     else:
-        return f"""Post estático Instagram.
-{base}
-COPY IMAGEN: título gancho + subtítulo + CTA "link en bio"
-CAPTION: 3-4 párrafos humanos. Precio: $50.000/3 meses.
-DISEÑO: logo Previplan, paleta corporativa, 1080x1080px."""
+        instruccion_prod = "Post estático: COPY DE IMAGEN (título + subtítulo) / CAPTION completo"
 
-# ─── Session state inicial ────────────────────────────────────────────────────
+    ctx = f"\nCONTEXTO DEL MES: {contexto}" if contexto.strip() else ""
+
+    prompt = f"""Pilar de contenido: {pilar}
+Subtema amplio: {subtema_amplio}
+Formato: {formato}
+Vocero: {vocero}{ctx}
+
+Tu tarea es desarrollar UNA pieza de contenido concreta para Previplan. Responde en este formato exacto:
+
+ANGULO:
+[Un título/ángulo creativo y específico para esta pieza. Ej: "5 señales hormonales que normalizas y no deberías" o "Mitos y verdades sobre la salud femenina que nadie te dijo". Debe ser llamativo y concreto.]
+
+PRODUCCION:
+[{instruccion_prod}. Desarrolla el contenido completo listo para producir. Sé específico, no genérico.]
+
+CAPTION:
+[Caption completo para la publicación. 3-4 párrafos cortos. Tono humano y cercano. Incluye el precio $50.000 por 3 meses y llamado a acción al final.]
+
+CTA:
+[Una frase corta y directa de llamado a la acción. Ej: "Comenta QUIERO SABER MÁS" o "Guarda este video, lo vas a necesitar".]"""
+
+    respuesta = llamar_groq(prompt, api_key)
+
+    # Parsear la respuesta
+    def extraer(clave, texto):
+        try:
+            inicio = texto.index(f"{clave}:") + len(f"{clave}:")
+            partes = texto[inicio:]
+            claves_resto = ["ANGULO:", "PRODUCCION:", "CAPTION:", "CTA:"]
+            fin = len(partes)
+            for k in claves_resto:
+                if k != f"{clave}:" and k in partes:
+                    fin = min(fin, partes.index(k))
+            return partes[:fin].strip()
+        except:
+            return ""
+
+    return {
+        "angulo":     extraer("ANGULO", respuesta),
+        "produccion": extraer("PRODUCCION", respuesta),
+        "caption":    extraer("CAPTION", respuesta),
+        "cta":        extraer("CTA", respuesta),
+        "raw":        respuesta,
+    }
+
+def generar_fechas(año, mes_num):
+    _, dias = calendar.monthrange(año, mes_num)
+    return [date(año, mes_num, d) for d in range(1, dias+1)
+            if date(año, mes_num, d).weekday() <= 5]
+
+# ─── Session state ────────────────────────────────────────────────────────────
 if "pilares" not in st.session_state:
     st.session_state.pilares = [
-        {
-            "nombre":   p["nombre"],
-            "hashtags": p["hashtags"],
-            "n":        4,
-            "subtemas": [],   # lista de {"texto", "formato", "red", "vocero"}
-        }
+        {"nombre": p["nombre"], "hashtags": p["hashtags"], "n": 4, "subtemas": []}
         for p in PILARES_DEFAULT
     ]
+if "piezas" not in st.session_state:
+    st.session_state.piezas = []
 
-# ─── Sidebar ─────────────────────────────────────────────────────────────────
+# ─── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("⚙️ Configuración")
 
@@ -157,10 +159,10 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    total_piezas = sum(p["n"] for p in st.session_state.pilares)
-    st.metric("Total piezas", total_piezas)
+    total = sum(p["n"] for p in st.session_state.pilares)
+    st.metric("Total piezas configuradas", total)
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# ─── Tabs ─────────────────────────────────────────────────────────────────────
 st.title("📅 Previplan — Generador de Parrilla")
 st.markdown("---")
 
@@ -174,86 +176,76 @@ tab_pilares, tab_parrilla, tab_guiones = st.tabs([
 # TAB 1 — PILARES Y SUBTEMAS
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_pilares:
+    st.caption("Define tus pilares y los subtemas amplios para cada uno. La IA generará el ángulo concreto, guión, caption y CTA de cada pieza.")
 
-    # ── Agregar / quitar pilares ──────────────────────────────────────────────
-    col_add, col_space = st.columns([2, 3])
-    with col_add:
-        with st.expander("➕ Agregar nuevo pilar"):
-            nuevo_pilar = st.text_input("Nombre del pilar", key="nuevo_pilar_nombre")
-            if st.button("Agregar pilar", type="primary"):
-                if nuevo_pilar.strip():
-                    nombres = [p["nombre"] for p in st.session_state.pilares]
-                    if nuevo_pilar.strip() not in nombres:
-                        st.session_state.pilares.append({
-                            "nombre":   nuevo_pilar.strip(),
-                            "hashtags": "",
-                            "n":        4,
-                            "subtemas": [],
-                        })
-                        st.success(f"Pilar '{nuevo_pilar.strip()}' agregado.")
-                        st.rerun()
-                    else:
-                        st.warning("Ya existe un pilar con ese nombre.")
+    # Agregar pilar
+    with st.expander("➕ Agregar nuevo pilar"):
+        np_nombre = st.text_input("Nombre del pilar", key="np_nombre")
+        np_ht     = st.text_input("Hashtags (opcional)", key="np_ht")
+        if st.button("Crear pilar", type="primary"):
+            if np_nombre.strip():
+                nombres = [p["nombre"] for p in st.session_state.pilares]
+                if np_nombre.strip() not in nombres:
+                    st.session_state.pilares.append({"nombre": np_nombre.strip(), "hashtags": np_ht.strip(), "n": 4, "subtemas": []})
+                    st.rerun()
                 else:
-                    st.error("Escribe el nombre del pilar.")
+                    st.warning("Ya existe ese pilar.")
 
     st.markdown("---")
 
-    # ── Configurar cada pilar ─────────────────────────────────────────────────
     for pi, pilar in enumerate(st.session_state.pilares):
-        with st.expander(f"**{pilar['nombre']}** — {pilar['n']} piezas · {len(pilar['subtemas'])} subtemas", expanded=False):
+        n_sub = len(pilar["subtemas"])
+        with st.expander(f"**{pilar['nombre']}** — {pilar['n']} piezas/mes · {n_sub} subtema{'s' if n_sub!=1 else ''}", expanded=False):
 
-            col1, col2, col3 = st.columns([3, 1, 1])
-            with col1:
-                nuevo_nombre = st.text_input("Nombre del pilar", value=pilar["nombre"], key=f"pnombre_{pi}")
-                if nuevo_nombre != pilar["nombre"]:
-                    st.session_state.pilares[pi]["nombre"] = nuevo_nombre
-            with col2:
-                nuevo_n = st.number_input("Piezas/mes", min_value=0, max_value=30, value=pilar["n"], key=f"pn_{pi}")
-                st.session_state.pilares[pi]["n"] = nuevo_n
-            with col3:
+            c1, c2, c3 = st.columns([3, 1, 1])
+            with c1:
+                nn = st.text_input("Nombre", value=pilar["nombre"], key=f"pn_{pi}")
+                st.session_state.pilares[pi]["nombre"] = nn
+            with c2:
+                nv = st.number_input("Piezas/mes", min_value=0, max_value=30, value=pilar["n"], key=f"pnum_{pi}")
+                st.session_state.pilares[pi]["n"] = nv
+            with c3:
                 st.markdown("<br>", unsafe_allow_html=True)
                 if len(st.session_state.pilares) > 1:
-                    if st.button("🗑️ Eliminar pilar", key=f"del_pilar_{pi}"):
+                    if st.button("🗑️ Eliminar", key=f"delp_{pi}"):
                         st.session_state.pilares.pop(pi)
                         st.rerun()
 
-            nuevo_ht = st.text_input("Hashtags del pilar", value=pilar["hashtags"], key=f"pht_{pi}")
-            st.session_state.pilares[pi]["hashtags"] = nuevo_ht
+            nh = st.text_input("Hashtags", value=pilar["hashtags"], key=f"pht_{pi}")
+            st.session_state.pilares[pi]["hashtags"] = nh
 
             st.markdown("##### Subtemas")
-            st.caption("Define los subtemas para este pilar. La parrilla rotará entre ellos.")
+            st.caption("Escribe temas amplios. La IA los convierte en piezas concretas.")
 
-            # Mostrar subtemas existentes
+            # Listar subtemas
             for si, sub in enumerate(pilar["subtemas"]):
                 sc1, sc2, sc3, sc4, sc5 = st.columns([3, 2, 1, 2, 1])
-                sc1.write(f"**{sub['texto']}**")
+                sc1.markdown(f"**{sub['texto']}**")
                 sc2.write(sub["formato"])
                 sc3.write(sub["red"])
                 sc4.write(sub["vocero"])
-                if sc5.button("🗑️", key=f"del_sub_{pi}_{si}"):
+                if sc5.button("🗑️", key=f"dels_{pi}_{si}"):
                     st.session_state.pilares[pi]["subtemas"].pop(si)
                     st.rerun()
 
-            # Formulario para agregar subtema
-            with st.form(key=f"form_sub_{pi}", clear_on_submit=True):
-                fc1, fc2, fc3, fc4 = st.columns([3, 2, 1, 2])
-                with fc1:
-                    sub_texto = st.text_input("Subtema", placeholder="Ej: Salud hormonal femenina", key=f"stxt_{pi}")
-                with fc2:
-                    sub_fmt = st.selectbox("Formato", FORMATOS, key=f"sfmt_{pi}")
-                with fc3:
-                    sub_red = st.selectbox("Red", REDES, key=f"sred_{pi}")
-                with fc4:
-                    sub_vocero = st.text_input("Vocero", value="General - marca", key=f"svoc_{pi}")
-                submitted = st.form_submit_button("Agregar subtema ✓", type="primary")
-                if submitted:
-                    if sub_texto.strip():
+            # Formulario agregar subtema
+            with st.form(key=f"fsub_{pi}", clear_on_submit=True):
+                fa, fb, fc, fd = st.columns([3, 2, 1, 2])
+                with fa:
+                    st_txt = st.text_input("Subtema amplio", placeholder="Ej: Salud femenina", key=f"stxt_{pi}")
+                with fb:
+                    st_fmt = st.selectbox("Formato", FORMATOS, key=f"sfmt_{pi}")
+                with fc:
+                    st_red = st.selectbox("Red", REDES, key=f"sred_{pi}")
+                with fd:
+                    st_voc = st.text_input("Vocero", value="General - marca", key=f"svoc_{pi}")
+                if st.form_submit_button("Agregar subtema ✓", type="primary"):
+                    if st_txt.strip():
                         st.session_state.pilares[pi]["subtemas"].append({
-                            "texto":   sub_texto.strip(),
-                            "formato": sub_fmt,
-                            "red":     sub_red,
-                            "vocero":  sub_vocero or "General - marca",
+                            "texto":   st_txt.strip(),
+                            "formato": st_fmt,
+                            "red":     st_red,
+                            "vocero":  st_voc or "General - marca",
                         })
                         st.rerun()
                     else:
@@ -265,23 +257,29 @@ with tab_pilares:
 with tab_parrilla:
     st.subheader(f"Parrilla — {mes_sel} {int(año_sel)}")
 
-    pilares_con_subtemas = [p for p in st.session_state.pilares if p["subtemas"] and p["n"] > 0]
+    pilares_ok = [p for p in st.session_state.pilares if p["subtemas"] and p["n"] > 0]
 
-    if not pilares_con_subtemas:
-        st.warning("Ve a **Pilares y Subtemas** y agrega al menos un subtema a cada pilar antes de generar.")
+    if not pilares_ok:
+        st.warning("Ve a **Pilares y Subtemas** y agrega al menos un subtema antes de generar.")
     else:
-        col_gen, col_clear = st.columns([2, 1])
+        col_gen, col_ia, col_clear = st.columns([2, 2, 1])
         with col_gen:
-            generar_btn = st.button("🚀 Generar parrilla", type="primary")
+            btn_estructura = st.button("📋 Generar estructura", type="primary",
+                                       help="Crea la parrilla con fechas y subtemas. Sin IA.")
+        with col_ia:
+            btn_ia = st.button("🤖 Generar con IA (completo)", type="primary",
+                               disabled=not groq_key,
+                               help="Genera estructura + ángulo, producción, caption y CTA con IA.")
         with col_clear:
-            if st.button("🗑️ Limpiar parrilla"):
-                st.session_state.pop("piezas", None)
+            if st.button("🗑️ Limpiar"):
+                st.session_state.piezas = []
                 st.rerun()
 
-        if generar_btn:
-            mes_num = MESES.index(mes_sel) + 1
-            fechas  = generar_fechas(int(año_sel), mes_num)
-            piezas  = []
+        # ── Generar solo estructura ──
+        if btn_estructura or btn_ia:
+            mes_num   = MESES.index(mes_sel) + 1
+            fechas    = generar_fechas(int(año_sel), mes_num)
+            piezas    = []
             fecha_idx = 0
             for pilar in st.session_state.pilares:
                 if not pilar["subtemas"] or pilar["n"] == 0:
@@ -289,81 +287,142 @@ with tab_parrilla:
                 subtemas = pilar["subtemas"]
                 for i in range(pilar["n"]):
                     sub = subtemas[i % len(subtemas)]
-                    f   = fechas[fecha_idx % len(fechas)]
-                    fecha_idx += 1
                     piezas.append({
-                        "pilar":    pilar["nombre"],
-                        "hashtags": pilar["hashtags"],
-                        "subtema":  sub["texto"],
-                        "formato":  sub["formato"],
-                        "red":      sub["red"],
-                        "vocero":   sub["vocero"],
-                        "fecha":    f,
-                        "status":   "Por planear",
-                        "guion":    "",
-                        "caption":  "",
+                        "pilar":      pilar["nombre"],
+                        "hashtags":   pilar["hashtags"],
+                        "subtema":    sub["texto"],
+                        "formato":    sub["formato"],
+                        "red":        sub["red"],
+                        "vocero":     sub["vocero"],
+                        "fecha":      fechas[fecha_idx % len(fechas)],
+                        "status":     "Por planear",
+                        "angulo":     "",
+                        "produccion": "",
+                        "caption":    "",
+                        "cta":        "",
                     })
-            st.session_state.piezas      = piezas
-            st.session_state.contexto_guardado = contexto_mes
-            st.success(f"✅ {len(piezas)} piezas generadas.")
-            if contexto_mes.strip():
-                st.info(f"📝 Contexto: {contexto_mes[:120]}...")
+                    fecha_idx += 1
+            st.session_state.piezas = piezas
+            st.session_state.ctx_guardado = contexto_mes
 
-        if "piezas" in st.session_state and st.session_state.piezas:
-            piezas = st.session_state.piezas
-            import pandas as pd
-            df = pd.DataFrame([{
-                "Fecha":   p["fecha"].strftime("%d %b"),
-                "Pilar":   p["pilar"],
-                "Formato": p["formato"],
-                "Red":     p["red"],
-                "Subtema": p["subtema"],
-                "Vocero":  p["vocero"],
-                "Status":  p["status"],
-            } for p in piezas])
-            st.dataframe(df, use_container_width=True, hide_index=True)
-
-            st.markdown("---")
-            st.subheader("🤖 Generar guiones con IA")
-            if not groq_key:
-                st.warning("Ingresa tu Groq API Key en el panel izquierdo.")
+            # Si eligió IA, generamos todo
+            if btn_ia:
+                ctx = contexto_mes
+                prog = st.progress(0, text="Generando con IA...")
+                for idx, p in enumerate(piezas):
+                    resultado = generar_pieza_ia(
+                        p["pilar"], p["subtema"], p["formato"], p["vocero"], ctx, groq_key
+                    )
+                    p["angulo"]     = resultado["angulo"]
+                    p["produccion"] = resultado["produccion"]
+                    p["caption"]    = resultado["caption"]
+                    p["cta"]        = resultado["cta"]
+                    prog.progress((idx+1)/len(piezas), text=f"Pieza {idx+1}/{len(piezas)}: {p['subtema'][:40]}...")
+                prog.empty()
+                st.session_state.piezas = piezas
+                st.success(f"✅ {len(piezas)} piezas generadas con IA.")
             else:
-                if st.button("Generar todos los guiones", type="primary"):
-                    ctx = st.session_state.get("contexto_guardado", "")
-                    progress = st.progress(0, text="Generando guiones...")
-                    for idx, p in enumerate(piezas):
-                        prompt = prompt_para_formato(p["formato"], p["pilar"], p["subtema"], p["vocero"], ctx)
-                        p["guion"] = llamar_groq(prompt, groq_key)
-                        lineas = [l.strip() for l in p["guion"].split("\n") if l.strip() and len(l) > 20 and not l.isupper()]
-                        p["caption"] = " ".join(lineas[:3])[:280]
-                        progress.progress((idx+1)/len(piezas), text=f"Generando {idx+1}/{len(piezas)}...")
-                    st.session_state.piezas = piezas
-                    progress.empty()
-                    st.success("✅ Guiones generados. Ve a la pestaña Guiones.")
+                st.success(f"✅ Estructura de {len(piezas)} piezas creada. Puedes generar los contenidos IA desde la pestaña Guiones.")
 
-            st.markdown("---")
-            st.subheader("📊 Subir a Google Sheets")
-            if st.text_input("ID del Spreadsheet", placeholder="1AihVeH-...", key="sheet_id_tab2"):
-                st.info("Configuración de Google Sheets próximamente.")
+        # ── Mostrar parrilla ──
+        if st.session_state.piezas:
+            piezas = st.session_state.piezas
+            st.markdown(f"**{len(piezas)} piezas** · {mes_sel} {int(año_sel)}")
+
+            # Tabla con status editable
+            for idx, p in enumerate(piezas):
+                with st.container():
+                    h1, h2, h3, h4, h5, h6 = st.columns([1.2, 2, 1.5, 1, 2, 2])
+                    h1.markdown(f"**{p['fecha'].strftime('%d %b')}**")
+                    h2.markdown(f"**{p['pilar']}**")
+                    h3.write(p["formato"])
+                    h4.write(p["red"])
+                    h5.write(p["subtema"])
+
+                    # Status desplegable
+                    status_idx = STATUS_OPTS.index(p["status"]) if p["status"] in STATUS_OPTS else 0
+                    nuevo_status = h6.selectbox(
+                        "", STATUS_OPTS, index=status_idx,
+                        key=f"status_{idx}", label_visibility="collapsed"
+                    )
+                    st.session_state.piezas[idx]["status"] = nuevo_status
+
+                    if p.get("angulo"):
+                        st.markdown(f"&nbsp;&nbsp;&nbsp;📌 *{p['angulo'][:100]}*")
+                    st.markdown("---")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — GUIONES
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_guiones:
-    st.subheader("Guiones generados")
-    piezas = st.session_state.get("piezas", [])
-    con_guion = [p for p in piezas if p.get("guion")]
+    st.subheader("Contenido detallado por pieza")
+    piezas = st.session_state.piezas
 
-    if not con_guion:
-        st.info("Genera los guiones desde la pestaña Parrilla.")
+    if not piezas:
+        st.info("Genera la parrilla primero desde la pestaña Parrilla.")
     else:
-        st.markdown(f"**{len(con_guion)} guiones listos**")
-        for i, p in enumerate(piezas):
-            if not p.get("guion"):
-                continue
-            ht = p.get("hashtags","") + " #TuSaludNoDaEspera #Previplan #Previsalud"
-            with st.expander(f"#{i+1} · {p['pilar']} · {p['formato']} · {p['subtema'][:55]}"):
-                st.markdown(f"📅 **{p['fecha'].strftime('%d %B %Y')}** · 📱 {p['red']} · 🎤 {p['vocero']}")
-                st.text_area("Guión completo", value=p["guion"], height=320, key=f"g_{i}")
-                st.text_area("Caption", value=p.get("caption",""), height=90, key=f"c_{i}")
-                st.code(ht.strip(), language=None)
+        # Botón para generar IA solo en piezas sin contenido
+        sin_contenido = [p for p in piezas if not p.get("angulo")]
+        if sin_contenido and groq_key:
+            if st.button(f"🤖 Generar IA para {len(sin_contenido)} piezas pendientes", type="primary"):
+                ctx  = st.session_state.get("ctx_guardado", "")
+                prog = st.progress(0, text="Generando...")
+                done = 0
+                for idx, p in enumerate(piezas):
+                    if not p.get("angulo"):
+                        resultado = generar_pieza_ia(p["pilar"], p["subtema"], p["formato"], p["vocero"], ctx, groq_key)
+                        st.session_state.piezas[idx]["angulo"]     = resultado["angulo"]
+                        st.session_state.piezas[idx]["produccion"] = resultado["produccion"]
+                        st.session_state.piezas[idx]["caption"]    = resultado["caption"]
+                        st.session_state.piezas[idx]["cta"]        = resultado["cta"]
+                        done += 1
+                        prog.progress(done/len(sin_contenido), text=f"Generando {done}/{len(sin_contenido)}...")
+                prog.empty()
+                st.success("✅ Listo.")
+                st.rerun()
+        elif not groq_key:
+            st.warning("Ingresa tu Groq API Key en el panel izquierdo.")
+
+        st.markdown("---")
+
+        for idx, p in enumerate(piezas):
+            label_color = "🟢" if p.get("angulo") else "⚪"
+            titulo = p.get("angulo") or p["subtema"]
+            with st.expander(f"{label_color} #{idx+1} · {p['pilar']} · {p['formato']} · {titulo[:60]}"):
+
+                col_info, col_status = st.columns([4, 1])
+                col_info.markdown(f"📅 **{p['fecha'].strftime('%d %B %Y')}** · 📱 {p['red']} · 🎤 {p['vocero']}")
+                status_idx = STATUS_OPTS.index(p["status"]) if p["status"] in STATUS_OPTS else 0
+                nuevo_st = col_status.selectbox("Status", STATUS_OPTS, index=status_idx, key=f"gst_{idx}")
+                st.session_state.piezas[idx]["status"] = nuevo_st
+
+                st.markdown(f"**Subtema amplio:** {p['subtema']}")
+
+                if p.get("angulo"):
+                    st.markdown(f"**📌 Ángulo / Título:** {p['angulo']}")
+                    st.markdown("**🎬 Guía de Producción**")
+                    prod = st.text_area("", value=p["produccion"], height=280, key=f"prod_{idx}", label_visibility="collapsed")
+                    st.session_state.piezas[idx]["produccion"] = prod
+
+                    st.markdown("**📝 Caption**")
+                    cap = st.text_area("", value=p["caption"], height=140, key=f"cap_{idx}", label_visibility="collapsed")
+                    st.session_state.piezas[idx]["caption"] = cap
+
+                    st.markdown("**🎯 CTA**")
+                    cta = st.text_input("", value=p["cta"], key=f"cta_{idx}", label_visibility="collapsed")
+                    st.session_state.piezas[idx]["cta"] = cta
+
+                    ht = p.get("hashtags","") + " #TuSaludNoDaEspera #Previplan #Previsalud"
+                    st.code(ht.strip(), language=None)
+                else:
+                    st.info("Sin contenido IA aún. Genera desde el botón de arriba.")
+
+                    # Generar solo esta pieza
+                    if groq_key and st.button("🤖 Generar solo esta pieza", key=f"gen1_{idx}"):
+                        ctx = st.session_state.get("ctx_guardado", "")
+                        resultado = generar_pieza_ia(p["pilar"], p["subtema"], p["formato"], p["vocero"], ctx, groq_key)
+                        st.session_state.piezas[idx]["angulo"]     = resultado["angulo"]
+                        st.session_state.piezas[idx]["produccion"] = resultado["produccion"]
+                        st.session_state.piezas[idx]["caption"]    = resultado["caption"]
+                        st.session_state.piezas[idx]["cta"]        = resultado["cta"]
+                        st.rerun()
