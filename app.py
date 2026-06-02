@@ -356,26 +356,70 @@ with tab_parrilla:
         if st.session_state.piezas:
             piezas = st.session_state.piezas
             st.markdown(f"**{len(piezas)} piezas** · {mes_sel} {int(año_sel)}")
+
+            # ── Descarga Excel ────────────────────────────────────────────
+            import io, pandas as pd
+            def generar_excel(piezas):
+                rows = []
+                for p in piezas:
+                    rows.append({
+                        "Fecha":       p["fecha"].strftime("%d/%m/%Y"),
+                        "Pilar":       p["pilar"],
+                        "Formato":     p["formato"],
+                        "Canal":       p["red"],
+                        "Subtema":     p["subtema"],
+                        "Ángulo / Título": p.get("angulo",""),
+                        "Producción":  p.get("produccion",""),
+                        "Caption":     p.get("caption",""),
+                        "CTA":         p.get("cta",""),
+                        "Hashtags":    p.get("hashtags","") + " #TuSaludNoDaEspera #Previplan #Previsalud",
+                        "Vocero":      p.get("vocero",""),
+                        "Status":      p.get("status","Por planear"),
+                    })
+                df = pd.DataFrame(rows)
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                    df.to_excel(writer, index=False, sheet_name="Parrilla")
+                    ws = writer.sheets["Parrilla"]
+                    for col in ws.columns:
+                        max_len = max(len(str(c.value or "")) for c in col)
+                        ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
+                buf.seek(0)
+                return buf
+
+            excel_buf = generar_excel(piezas)
+            st.download_button(
+                label="⬇️ Descargar Excel",
+                data=excel_buf,
+                file_name=f"Parrilla_{mes_sel}_{int(año_sel)}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
             st.markdown("---")
 
-            # Encabezados
-            h = st.columns([1.2, 2, 1.5, 1, 3, 2])
-            for col, txt in zip(h, ["Fecha","Pilar","Formato","Canal","Subtema / Ángulo","Status"]):
-                col.markdown(f"**{txt}**")
-            st.markdown("---")
-
+            # ── Tabla ─────────────────────────────────────────────────────
             for idx, p in enumerate(piezas):
-                cols = st.columns([1.2, 2, 1.5, 1, 3, 2])
-                cols[0].write(p["fecha"].strftime("%d %b"))
-                cols[1].write(p["pilar"])
-                cols[2].write(p["formato"])
-                cols[3].write(p["red"])
-                angulo_txt = p["angulo"] if p["angulo"] else f"*{p['subtema']}*"
-                cols[4].write(angulo_txt[:80])
-                status_idx = STATUS_OPTS.index(p["status"]) if p["status"] in STATUS_OPTS else 0
-                nuevo_st = cols[5].selectbox("", STATUS_OPTS, index=status_idx,
-                                             key=f"st_{idx}", label_visibility="collapsed")
-                st.session_state.piezas[idx]["status"] = nuevo_st
+                with st.container():
+                    r1 = st.columns([1.2, 2, 1.3, 1, 3, 2])
+                    r1[0].write(p["fecha"].strftime("%d %b"))
+                    r1[1].write(p["pilar"])
+                    r1[2].write(p["formato"])
+                    r1[3].write(p["red"])
+                    angulo_txt = p["angulo"] if p["angulo"] else f"*{p['subtema']}*"
+                    r1[4].write(angulo_txt[:90])
+                    status_idx = STATUS_OPTS.index(p["status"]) if p["status"] in STATUS_OPTS else 0
+                    nuevo_st = r1[5].selectbox("", STATUS_OPTS, index=status_idx,
+                                               key=f"st_{idx}", label_visibility="collapsed")
+                    st.session_state.piezas[idx]["status"] = nuevo_st
+
+                    if p.get("caption") or p.get("cta"):
+                        r2 = st.columns([1, 4, 2])
+                        r2[0].markdown("")
+                        if p.get("caption"):
+                            r2[1].caption(f"📝 **Caption:** {p['caption'][:180]}{'...' if len(p.get('caption',''))>180 else ''}")
+                        if p.get("cta"):
+                            r2[2].caption(f"🎯 **CTA:** {p['cta']}")
+                    st.markdown("---")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — GUIONES
